@@ -18,7 +18,7 @@ Install dependency berikut:
 - modbusmaster by doc Walker ver 1.0.0
 
 Setelah diinstall buka C:/document/Arduino/Libraries/Modbusmaster lalu cari file modbusmaster.h dan ganti nilai parameter ini:
-```modbusmaster.h
+```bash
 static const uint16_t ku16MBResponseTimeout          = 200; ///< Modbus timeout [milliseconds] 2000
 ```
 
