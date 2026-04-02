@@ -12,7 +12,7 @@ Project ini digunakan untuk membaca data dari **pyrometer, PZEM DC, dan ds1303**
   - I2C (LCD I2C)
   - Modbus (industrial pyrometer, PZEM DC)
 
-## 🧰 Requirements
+## 🧰 Library Requirements
 
 Install dependency berikut:
 - modbusmaster by doc Walker ver 1.0.0
@@ -26,11 +26,31 @@ static const uint16_t ku16MBResponseTimeout          = 200; ///< Modbus timeout 
 
 
 
-| Parameter     | Nilai       | Keterangan              |
+| Parameter     | Komponen terlibat       | Protokol              |
 |--------------|------------|------------------------|
-| Sensor       | MLX90614   | Infrared temperature   |
-| Interface    | I2C        | Address 0x5A           |
-| Sampling     | 1 Hz       | 1 detik sekali         |
+| Radiasi       | pyro sensor   | ModbusRTU   |
+| Listrik       | PZEM sensor   | ModbusRTU   |
+| Temperatur       | DS1303 | OneWire   |
+| Interface    | LCD        | I2C          |
+| Waktu     | RTC      | I2C        |
+| Memori     | SD Card      | SPI        |
 
 
-# Software Calibrator RTC
+## Schematic
+<p align="center">
+  <img src="image/schematic_pyro.png" width="1500"/>
+  <br>
+  <em>Figure 1. Pyrometer System Schematic</em>
+</p>
+
+## 3d Design
+<p align="center">
+  <img src="image/3d_design_pyro.png" width="1500"/>
+  <br>
+  <em>Figure 2. Pyrometer 3d Design</em>
+</p>
+
+## Upload Firmware
+- upload firmware.ino
+- Setting RTC bisa run script calibrator.py setelah firmware.ino di upload
+- catatan : ketika kalibrasi RTC tidak ada serial monitor yang terbuka
