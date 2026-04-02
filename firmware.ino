@@ -181,8 +181,8 @@ void setup() {
     Serial.println("SD Card OK");
   }
   //mySerial.begin(9600);
-  Serial2.begin(4800);// PYRANOMETER
-  Serial3.begin(9600);
+  Serial3.begin(4800);// PYRANOMETER
+  Serial2.begin(9600);
 
 
   //pinMode(success, OUTPUT);
@@ -198,8 +198,8 @@ void setup() {
   Serial.println("setting up Serial ");
   Serial.println("setting up RS485 port ");
 //  slave id
-  node.begin(1, Serial2);
-  node1.begin(1, Serial3);
+  node.begin(1, Serial3);
+  node1.begin(1, Serial2);
 //rtc.adjust(DateTime(2026, 3, 9, 20, 0, 0));
 //rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
   
