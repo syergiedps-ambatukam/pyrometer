@@ -1,124 +1,79 @@
 #include<avr/wdt.h> /* Header for watchdog timers in AVR */
+String serialBuffer = "";
+
 
 #define ONE_WIRE_PIN 7
 
-byte data[9];
-
-unsigned long lastRequest = 0;
-bool conversionRunning = false;
-
-// ================= 1-Wire =================
-
-bool resetPulse() {
-
+// ================= LOW LEVEL =================
+void pinLow() {
   pinMode(ONE_WIRE_PIN, OUTPUT);
   digitalWrite(ONE_WIRE_PIN, LOW);
+}
+
+void pinRelease() {
+  pinMode(ONE_WIRE_PIN, INPUT_PULLUP);
+}
+
+// ================= RESET =================
+bool onewire_reset() {
+  pinLow();
   delayMicroseconds(480);
 
-  pinMode(ONE_WIRE_PIN, INPUT_PULLUP);
+  pinRelease();
   delayMicroseconds(70);
 
-  bool presence = !digitalRead(ONE_WIRE_PIN);
+  bool presence = !digitalRead(ONE_WIRE_PIN); // harus LOW
 
   delayMicroseconds(410);
-
   return presence;
 }
 
-void writeBit(bool bit) {
-
-  pinMode(ONE_WIRE_PIN, OUTPUT);
-  digitalWrite(ONE_WIRE_PIN, LOW);
-
+// ================= WRITE BIT =================
+void onewire_write_bit(bool bit) {
+  pinLow();
   if (bit) {
+    delayMicroseconds(6);
+    pinRelease();
+    delayMicroseconds(64);
+  } else {
+    delayMicroseconds(60);
+    pinRelease();
     delayMicroseconds(10);
-    pinMode(ONE_WIRE_PIN, INPUT_PULLUP);
-    delayMicroseconds(55);
-  }
-  else {
-    delayMicroseconds(65);
-    pinMode(ONE_WIRE_PIN, INPUT_PULLUP);
-    delayMicroseconds(5);
   }
 }
 
-bool readBit() {
+// ================= READ BIT =================
+bool onewire_read_bit() {
+  pinLow();
+  delayMicroseconds(6);
 
-  bool bit;
+  pinRelease();
+  delayMicroseconds(9);
 
-  pinMode(ONE_WIRE_PIN, OUTPUT);
-  digitalWrite(ONE_WIRE_PIN, LOW);
-  delayMicroseconds(3);
+  bool bit = digitalRead(ONE_WIRE_PIN);
 
-  pinMode(ONE_WIRE_PIN, INPUT_PULLUP);
-  delayMicroseconds(10);
-
-  bit = digitalRead(ONE_WIRE_PIN);
-
-  delayMicroseconds(53);
-
+  delayMicroseconds(55);
   return bit;
 }
 
-void writeByte(byte data) {
-
+// ================= BYTE =================
+void onewire_write_byte(byte data) {
   for (int i = 0; i < 8; i++) {
-
-    writeBit(data & 0x01);
+    onewire_write_bit(data & 0x01);
     data >>= 1;
-
   }
-
 }
 
-byte readByte() {
-
-  byte value = 0;
-
+byte onewire_read_byte() {
+  byte data = 0;
   for (int i = 0; i < 8; i++) {
-
-    if (readBit()) {
-      value |= (1 << i);
+    if (onewire_read_bit()) {
+      data |= (1 << i);
     }
-
   }
-
-  return value;
+  return data;
 }
 
-// ================= DS18B20 =================
-
-void startConversion() {
-
-  if (!resetPulse()) {
-    Serial.println("Sensor tidak terdeteksi");
-    return;
-  }
-
-  writeByte(0xCC);   // Skip ROM
-  writeByte(0x44);   // Convert T
-
-}
-
-float readTemperature() {
-
-  if (!resetPulse()) {
-    Serial.println("Sensor tidak terdeteksi");
-    return -1000;
-  }
-
-  writeByte(0xCC);
-  writeByte(0xBE);   // Read Scratchpad
-
-  for (int i = 0; i < 9; i++) {
-    data[i] = readByte();
-  }
-
-  int16_t raw = (data[1] << 8) | data[0];
-  float temperature = raw / 16.0;
-
-  return temperature;
-}
 
 
 
@@ -135,18 +90,20 @@ char daysOfTheWeek[7][12] = {
 
 float temperature;
 
+unsigned long pzem_time;
+unsigned long pzem_time_prev;
+
 
 //DI => TX  6
 //RO => RX 5
 //SoftwareSerial mySerial(6, 5);  // RX, TX
 
-int success = 12;
-int fail = 11;
 
 float voltage;
 float current;
 float power;
 float energy;
+//float power_scaleup;
 
 float solar_radiation;
 
@@ -170,45 +127,47 @@ LiquidCrystal_I2C lcd(0x27, 20, 4);
 char str[10];
 
 void setup() {
-  wdt_enable(WDTO_8S);
+  wdt_enable(WDTO_4S);
   lcd.init();
   lcd.backlight();
-  Serial.begin(9600);
+
   if (!SD.begin(10)) {
+    lcd.setCursor(0,1);
+    lcd.print("ERROR, CHECK SD CARD");
+    
     Serial.println("SD card gagal");
     while (1);
   } else {
     Serial.println("SD Card OK");
   }
   //mySerial.begin(9600);
-  Serial2.begin(4800);// PYRANOMETER
-  Serial3.begin(9600);
+  Serial2.begin(9600);
+  Serial3.begin(4800);// PYRANOMETER
 
-
-  //pinMode(success, OUTPUT);
-  //pinMode(fail, OUTPUT);
   // Init in receive mode
 
 
   //My slave uses 9600 baud
 
-  
+  Serial.begin(9600);
   delay(10);
   Serial.println("starting arduino: ");
   Serial.println("setting up Serial ");
   Serial.println("setting up RS485 port ");
 //  slave id
-  node.begin(1, Serial2);
-  node1.begin(1, Serial3);
-//rtc.adjust(DateTime(2026, 3, 9, 20, 0, 0));
-//rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
-  
-  
+  node1.begin(1, Serial2);
+  node.begin(1, Serial3);
+
+
   if (!rtc.begin()) {
     Serial.println("Couldn't find RTC");
+    lcd.setCursor(0,1);
+    lcd.print("ERROR, CHECK RTC");
+    
     while (1);
   }
 
+  
   if (rtc.lostPower()) {
     Serial.println("RTC lost power, setting time!");
     
@@ -218,21 +177,88 @@ void setup() {
     // Atau set manual seperti ini
     // rtc.adjust(DateTime(2026, 3, 9, 15, 30, 0));
   }
-  
 
-  //sensors.begin();  
 
+}
+
+void parseTime(String data) {
+
+  int h,m,s,d,mo,y;
+
+  sscanf(data.c_str(), "%d:%d:%d,%d:%d:%d",
+         &h,&m,&s,&d,&mo,&y);
+
+  Serial.print("Jam   : "); Serial.println(h);
+  Serial.print("Menit : "); Serial.println(m);
+  Serial.print("Detik : "); Serial.println(s);
+  Serial.print("Tanggal: "); Serial.println(d);
+  Serial.print("Bulan : "); Serial.println(mo);
+  Serial.print("Tahun : "); Serial.println(y);
+
+
+  rtc.adjust(DateTime(y, mo, d, h, m, s));
+
+  Serial.println("RTC Updated");
 }
 
 
 void loop() {
   wdt_reset();
+
+  if (!onewire_reset()) {
+    Serial.println("Sensor tidak terdeteksi");
+    delay(1000);
+    return;
+  }
+
+  // Skip ROM (asumsi 1 sensor)
+  onewire_write_byte(0xCC);
+
+  // Convert T
+  onewire_write_byte(0x44);
+
+  delay(750); // waktu konversi (12-bit)
+
+  // Reset lagi
+  if (!onewire_reset()) {
+    Serial.println("Sensor hilang");
+    delay(1000);
+    return;
+  }
+
+  onewire_write_byte(0xCC);
+  onewire_write_byte(0xBE); // Read Scratchpad
+
+  byte temp_l = onewire_read_byte();
+  byte temp_h = onewire_read_byte();
+
+  int16_t raw = (temp_h << 8) | temp_l;
+
+  temp = raw / 16.0;
+
+  
+
+  while (Serial.available()) {
+    char c = Serial.read();
+
+    if (c == '\n') {   // akhir data
+      parseTime(serialBuffer);
+      serialBuffer = "";
+    } else {
+      serialBuffer += c;
+    }
+  }
+
   
   int result;
   uint16_t data[10]; // Array to store the read data
   
+  //while (Serial3.available()) Serial3.read();
+
+  //delay(1); // kasih jeda sebelum request
+  
   // Read holding registers starting from address 0, read 10 registers
-  result = node.readHoldingRegisters(0, 10);
+  result = node.readHoldingRegisters(0, 1);
   // Check if the read operation was successful
   if (result == node.ku8MBSuccess) {
     // Print each register value
@@ -240,16 +266,18 @@ void loop() {
       data[i] = node.getResponseBuffer(i); // Get the value of each register
       if(i==0){ 
       solar_radiation = data[i];
-      /*
-      Serial.print("Register ");
-      Serial.print(i);
-      Serial.print(": ");
-      Serial.println(data[i]);
-      */
+      //Serial.print("Register ");
+      //Serial.print(i);
+      //Serial.print(": ");
+      //Serial.println(data[i]);
+      //digitalWrite(success, HIGH);
+      //digitalWrite(fail, LOW);
+
       }
     }
   } else {
-      Serial.println("PYRO ERROR");
+
+    Serial.println("PYRO ERROR");
   }
 
 
@@ -269,6 +297,7 @@ void loop() {
       }
 
       if (i == 2){
+        // power = float(data1[i])/100;
         power = float(data1[i]);
       }
 
@@ -281,34 +310,25 @@ void loop() {
       Serial.print(": ");
       Serial.println(data1[i]);
       */
+
+      pzem_time_prev = millis();
     }
   } else{
     Serial.println("PZEM ERROR");
+
+
+  }
+  pzem_time = millis() - pzem_time_prev;
+  if (pzem_time > 2500){
+      voltage = 0;
+      current = 0;
+      power = 0; 
   }
 
   //sensors.requestTemperatures();
   //temperature = sensors.getTempCByIndex(0);
-  
-  if (!conversionRunning) {
-
-    startConversion();
-    lastRequest = millis();
-    conversionRunning = true;
-
-  }
-
-  if (conversionRunning && millis() - lastRequest >= 750) {
-
-    temp = readTemperature();
-    //Serial.println(temp);
-   
-
-    conversionRunning = false;
-
-  }
 
 
-  
   DateTime now = rtc.now();
   minutes = now.minute();
 
@@ -327,10 +347,18 @@ void loop() {
 
   
 
-  
-  String fileName = dayStr + monthStr + yearStr.substring(2) + ".csv";
+
+  String fileName = monthStr + dayStr + yearStr.substring(2) + ".csv";
+
+
+ 
+
+
 
   if (minutes != minutes_prev){  
+
+ 
+
     Serial.print(formattedTime);
     Serial.print(" ");
     Serial.print(solar_radiation);
@@ -346,7 +374,7 @@ void loop() {
     Serial.print(temp);
     Serial.println();
     // cek apakah file sudah ada
-    
+    ///*
     if (!SD.exists(fileName)) {
       Serial.println("File belum ada, membuat file...");
 
@@ -359,7 +387,6 @@ void loop() {
       }
     }
      else {
-        Serial.println("save data");
         dataFile = SD.open(fileName, FILE_WRITE);
         if (dataFile) {
         dataFile.println(hourStr + ":" + minuteStr + ":" + secondStr + ","
@@ -373,38 +400,74 @@ void loop() {
         }
     }
     
-    
+    //*/
   }
-  
+
   // Voltage
   dtostrf(voltage,6,2,str);
-  lcd.setCursor(0,0);
-  lcd.print("Volt : ");
+  lcd.setCursor(0,1);
+  lcd.print("V:");
   lcd.print(str);
-  lcd.print(" V   ");
+  //lcd.print("V");
 
   // Current
   dtostrf(current,6,2,str);
-  lcd.setCursor(0,1);
-  lcd.print("Curr : ");
+  lcd.setCursor(0,2);
+  lcd.print("I:");
   lcd.print(str);
-  lcd.print(" A   ");
+  //lcd.print("A");
 
   // Power
   dtostrf(power,6,2,str);
-  lcd.setCursor(0,2);
-  lcd.print("Power: ");
+  lcd.setCursor(0,3);
+  lcd.print("P:");
   lcd.print(str);
-  lcd.print(" W   ");
+  //lcd.print("W");
 
   // Solar Radiation
   dtostrf(solar_radiation,6,1,str);
-  lcd.setCursor(0,3);
-  lcd.print("Solar: ");
+  lcd.setCursor(10,2);
+  lcd.print("G:");
   lcd.print(str);
-  lcd.print(" W/m2");
+  //lcd.print("W/m2");
 
-  
+  //temperature:
+  dtostrf(temp,6,2,str);
+  lcd.setCursor(10,1);
+  lcd.print("T:");
+  lcd.print(str);
+  lcd.setCursor(18,1);
+  lcd.print("  ");
+  //lcd.print("C");
+
+  //time:
+  lcd.setCursor(0,0);
+  if(now.day()<10) lcd.print("0");
+  lcd.print(now.day());
+  lcd.setCursor(2,0);
+  lcd.print("/");
+  lcd.setCursor(3,0);
+  if(now.month()<10) lcd.print("0");
+  lcd.print(now.month());
+  lcd.setCursor(5,0);
+  lcd.print("/");
+  lcd.setCursor(6,0);
+  lcd.print(now.year());
+  lcd.setCursor(11,0);
+  if(now.hour()<10) lcd.print("0");
+  lcd.print(now.hour());
+  lcd.setCursor(13,0);
+  lcd.print(":");
+  lcd.setCursor(14,0);
+  if(now.minute()<10) lcd.print("0");
+  lcd.print(now.minute());
+  lcd.setCursor(16,0);
+  lcd.print(":");
+  lcd.setCursor(17,0);
+  if(now.second()<10) lcd.print("0");
+  lcd.print(now.second());
+
+  delay(10);
   
   minutes_prev = minutes;
 }
